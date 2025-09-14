@@ -14,7 +14,6 @@ class Config:
     # PDF configuration
     RECEIPTS_PER_PAGE = 4
     DEFAULT_ORIGIN = 'BAVLA'
-    DEFAULT_SENDER = 'PHC - PRIMARY HEALTH CENTER - BAVLA'
     
     # Logging configuration
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
