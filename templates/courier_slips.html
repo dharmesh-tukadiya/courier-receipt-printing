@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Shree Balaji Courier Slip — 4 per page (Landscape)</title>
+    <title>Print POD</title>
     <style>
         :root {
             --accent: #222;
@@ -154,7 +154,7 @@
             }
 
             .page {
-                gap: 0;
+                gap: 10px;
                 padding: 0;
                 width: 100%;
                 height: 100%
@@ -194,10 +194,14 @@
 
         {% for i in range(4) %}
         {% if i < page_dockets|length %} {% set docket=page_dockets[i] %} <div class="slip">
+            <div
+                style="display: flex;justify-content: center;align-items: center;font-size: 12px;font-weight: 700; margin-bottom: 6px;text-decoration: underline;padding-bottom:10px;">
+                Courier Receipt For Account's Copy
+            </div>
             <div class="head">
                 <div>
                     <div class="name">Shree Balaji Courier Services</div>
-                    <div class="addr">15, Madhav Complex, Nr. Bavla Sanand Chokdi, Bavla - 382220.</div>
+                    <div class="addr">15, Madhav Complex, Nr. Bavla Sanand Chokdi, Bavla - 382220. Mo.: 9909287519</div>
                 </div>
                 <div class="docket-block">
                     <div class="label">Docket No.</div>
