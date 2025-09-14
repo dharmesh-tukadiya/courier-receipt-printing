@@ -58,18 +58,6 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this'
 
-# Configuration for file uploads
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-
-# Create upload folder if it doesn't exist
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
 def check_dependencies():
     """Check if all required dependencies are available"""
     missing = []
@@ -255,207 +243,6 @@ class DatabaseManager:
             logger.error(f"Error retrieving dockets: {str(e)}")
             return []
 
-class PDFGenerator:
-    def __init__(self, logo_path=None):
-        if not HAS_REPORTLAB:
-            raise ImportError("reportlab library not available")
-            
-        # Use landscape A4 for 4 receipts per page (2x2 grid)
-        self.page_width, self.page_height = landscape(A4)
-        self.margin = 10 * mm
-        
-        # Calculate receipt dimensions for 2x2 grid
-        self.receipt_width = (self.page_width - 3 * self.margin) / 2
-        self.receipt_height = (self.page_height - 3 * self.margin) / 2
-        
-        self.logo_path = logo_path
-        
-    def create_barcode(self, code):
-        """Create a barcode drawing"""
-        try:
-            barcode = code128.Code128(str(code), barHeight=8*mm, barWidth=0.6*mm)
-            drawing = Drawing(40*mm, 12*mm)
-            barcode.x = 2*mm
-            barcode.y = 2*mm
-            drawing.add(barcode)
-            return drawing
-        except Exception as e:
-            logger.warning(f"Error creating barcode: {e}")
-            return None
-    
-    def create_single_receipt(self, docket, party_info):
-        """Create a single receipt matching the sample image format"""
-        try:
-            # Create main table structure
-            receipt_data = []
-            
-            # Header with logo and company info
-            header_row = []
-            
-            # Logo cell (if available)
-            if self.logo_path and os.path.exists(self.logo_path):
-                try:
-                    logo = Image(self.logo_path, width=20*mm, height=15*mm)
-                    header_row.append(logo)
-                except:
-                    header_row.append("LOGO")
-            else:
-                header_row.append("LOGO")
-            
-            # Company header
-            company_info = """TRACKON
-Primary Health Center
-BAVLA - Gujarat"""
-            header_row.append(company_info)
-            
-            receipt_data.append(header_row)
-            
-            # Consignor and Consignee section
-            consignor_consignee = [
-                ["CONSIGNOR", "CONSIGNEE"],
-                [f"PHC - BAVLA\nGujarat", f"{party_info['name']}\n{party_info['adr1']}\n{party_info['city']}"]
-            ]
-            receipt_data.extend(consignor_consignee)
-            
-            # Docket details
-            details_section = [
-                ["Date", docket['date'].strftime('%d/%m/%Y'), "Docket No", docket['docket_no']],
-                ["Origin", docket['origin'], "Destination", docket['destination']],
-                ["Weight", f"{docket['weight']} kg", "Amount", f"₹{docket['amount']}"],
-                ["Reference", docket['ref_no'], "Phone", party_info['phone']]
-            ]
-            receipt_data.extend(details_section)
-            
-            # Service section
-            service_section = [
-                ["SERVICE TYPE", "", "", ""],
-                ["Cash ☐", "Credit ☐", "Total", "GST"],
-                ["", "", "", ""],
-                ["Risk Charges", "Courier Charges", "Air Surface", "PCS"]
-            ]
-            receipt_data.extend(service_section)
-            
-            # Barcode section
-            barcode_row = ["TRACKING NUMBER", "", "", ""]
-            receipt_data.append(barcode_row)
-            
-            # Create table
-            col_widths = [self.receipt_width/4] * 4
-            table = Table(receipt_data, colWidths=col_widths, rowHeights=[12*mm] * len(receipt_data))
-            
-            # Apply styling to match the sample
-            table.setStyle(TableStyle([
-                # General styling
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                
-                # Header styling
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 8),
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('ALIGN', (1, 0), (1, 0), 'CENTER'),
-                
-                # Consignor/Consignee headers
-                ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-                ('BACKGROUND', (0, 1), (-1, 1), colors.lightgrey),
-                ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
-                
-                # Service section styling
-                ('FONTNAME', (0, 6), (-1, 6), 'Helvetica-Bold'),
-                ('BACKGROUND', (0, 6), (-1, 6), colors.lightgrey),
-                
-                # Span cells for better layout
-                ('SPAN', (1, 0), (-1, 0)),  # Company info span
-                ('SPAN', (0, 2), (1, 2)),   # Consignor span
-                ('SPAN', (2, 2), (-1, 2)),  # Consignee span
-                ('SPAN', (0, 6), (-1, 6)),  # Service type span
-                ('SPAN', (0, -1), (-1, -1)),  # Tracking number span
-            ]))
-            
-            return table
-            
-        except Exception as e:
-            logger.error(f"Error creating receipt: {str(e)}")
-            return None
-    
-    def generate_pdf(self, dockets, parties_map, output_path):
-        """Generate PDF with receipts in 2x2 grid layout"""
-        try:
-            doc = SimpleDocTemplate(
-                output_path,
-                pagesize=landscape(A4),
-                rightMargin=self.margin,
-                leftMargin=self.margin,
-                topMargin=self.margin,
-                bottomMargin=self.margin
-            )
-            
-            story = []
-            
-            # Group dockets into pages of 4 (2x2 grid)
-            for page_start in range(0, len(dockets), 4):
-                page_dockets = dockets[page_start:page_start+4]
-                
-                # Create 2x2 grid of receipts
-                page_data = []
-                
-                for row in range(2):
-                    row_receipts = []
-                    for col in range(2):
-                        receipt_index = row * 2 + col
-                        if receipt_index < len(page_dockets):
-                            docket = page_dockets[receipt_index]
-                            party_info = parties_map.get(docket['party_code'], {
-                                'name': docket.get('party_name', 'Unknown Party'),
-                                'city': docket.get('destination', ''),
-                                'phone': '',
-                                'mobile': '',
-                                'adr1': '',
-                                'adr2': '',
-                                'adr3': ''
-                            })
-                            
-                            receipt = self.create_single_receipt(docket, party_info)
-                            if receipt:
-                                row_receipts.append(receipt)
-                            else:
-                                row_receipts.append("")
-                        else:
-                            row_receipts.append("")  # Empty cell
-                    
-                    page_data.append(row_receipts)
-                
-                # Create page table
-                if page_data:
-                    page_table = Table(page_data, 
-                                     colWidths=[self.receipt_width, self.receipt_width],
-                                     rowHeights=[self.receipt_height, self.receipt_height])
-                    
-                    page_table.setStyle(TableStyle([
-                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                        ('LEFTPADDING', (0, 0), (-1, -1), 2),
-                        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-                        ('TOPPADDING', (0, 0), (-1, -1), 2),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                    ]))
-                    
-                    story.append(page_table)
-                
-                # Add page break if not last page
-                if page_start + 4 < len(dockets):
-                    story.append(PageBreak())
-            
-            doc.build(story)
-            logger.info(f"PDF generated successfully: {output_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error generating PDF: {str(e)}")
-            return False
-
 # Initialize components
 db_manager = DatabaseManager()
 
@@ -463,43 +250,7 @@ db_manager = DatabaseManager()
 def index():
     """Main page"""
     missing_deps = check_dependencies()
-    # Get current logo path
-    logo_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.startswith('logo.') and allowed_file(f)] if os.path.exists(UPLOAD_FOLDER) else []
-    current_logo = logo_files[0] if logo_files else None
-    
-    return render_template('index.html', missing_dependencies=missing_deps, current_logo=current_logo)
-
-@app.route('/upload-logo', methods=['POST'])
-def upload_logo():
-    """Handle logo upload"""
-    if 'logo' not in request.files:
-        flash('No logo file selected', 'error')
-        return redirect(url_for('index'))
-    
-    file = request.files['logo']
-    if file.filename == '':
-        flash('No logo file selected', 'error')
-        return redirect(url_for('index'))
-    
-    if file and allowed_file(file.filename):
-        # Remove existing logo files
-        for existing_file in os.listdir(UPLOAD_FOLDER):
-            if existing_file.startswith('logo.'):
-                os.remove(os.path.join(UPLOAD_FOLDER, existing_file))
-        
-        # Save new logo
-        filename = secure_filename(file.filename)
-        file_extension = filename.rsplit('.', 1)[1].lower()
-        new_filename = f"logo.{file_extension}"
-        file_path = os.path.join(UPLOAD_FOLDER, new_filename)
-        file.save(file_path)
-        
-        flash('Logo uploaded successfully!', 'success')
-        logger.info(f"Logo uploaded: {file_path}")
-    else:
-        flash('Invalid file type. Please upload PNG, JPG, JPEG, GIF, or BMP files only.', 'error')
-    
-    return redirect(url_for('index'))
+    return render_template('index.html', missing_dependencies=missing_deps)
 
 @app.route('/api/dependencies')
 def check_deps():
@@ -531,98 +282,136 @@ def test_connection():
         logger.error(f"API Error testing connection: {str(e)}")
         return jsonify({'success': False})
 
-@app.route('/generate', methods=['POST'])
-def generate_receipts():
-    """Generate receipts PDF"""
+@app.route('/api/dockets')
+def get_dockets_api():
+    """API endpoint to get dockets data"""
     try:
-        # Check dependencies first
-        missing_deps = check_dependencies()
-        if missing_deps:
-            flash(f'Missing dependencies: {", ".join(missing_deps)}', 'error')
-            return render_template('index.html', missing_dependencies=missing_deps)
-        
-        # Get logo path
-        logo_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.startswith('logo.') and allowed_file(f)] if os.path.exists(UPLOAD_FOLDER) else []
-        logo_path = os.path.join(UPLOAD_FOLDER, logo_files[0]) if logo_files else None
-        
-        # Initialize PDF generator
-        pdf_generator = PDFGenerator(logo_path=logo_path)
-        
-        # Get form data
-        start_date_str = request.form.get('start_date')
-        end_date_str = request.form.get('end_date')
-        party_code = request.form.get('party_code')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        party_code = request.args.get('party_code')
         
         if not start_date_str or not end_date_str:
-            flash('Please provide both start and end dates', 'error')
-            return render_template('index.html')
+            return jsonify({'error': 'Missing date parameters'}), 400
         
         # Parse dates
         start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
         
-        # Get data
+        # Get dockets
         dockets = db_manager.get_dockets(start_date, end_date, party_code)
         
-        if not dockets:
-            flash('No dockets found for the selected criteria', 'warning')
-            return render_template('index.html')
-        
+        # Get parties for mapping
         parties = db_manager.get_parties()
         parties_map = {p['code']: p for p in parties}
         
-        # Get party name for filename
-        party_name = "All_Parties"
-        if party_code:
-            party_info = parties_map.get(party_code)
-            if party_info:
-                party_name = party_info['name'].replace(' ', '_').replace('/', '_')
-        
-        # Generate filename
-        filename = f"Receipts_{party_name}_{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}.pdf"
-        
-        # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-        temp_path = temp_file.name
-        temp_file.close()
-        
-        # Generate PDF
-        success = pdf_generator.generate_pdf(dockets, parties_map, temp_path)
-        
-        if success:
-            return send_file(
-                temp_path,
-                as_attachment=True,
-                download_name=filename,
-                mimetype='application/pdf'
-            )
-        else:
-            flash('Error generating PDF', 'error')
-            return render_template('index.html')
+        # Enhance dockets with party information
+        enhanced_dockets = []
+        for docket in dockets:
+            party_info = parties_map.get(docket.get('party_code'), {})
             
+            # Format consignee info
+            consignee_parts = []
+            if party_info.get('name'):
+                consignee_parts.append(party_info['name'])
+            if party_info.get('adr1'):
+                consignee_parts.append(party_info['adr1'])
+            if party_info.get('adr2'):
+                consignee_parts.append(party_info['adr2'])
+            if party_info.get('city'):
+                consignee_parts.append(party_info['city'])
+            if party_info.get('phone'):
+                consignee_parts.append(f"Phone: {party_info['phone']}")
+            
+            enhanced_docket = {
+                'docket_no': docket['docket_no'],
+                'date': docket['date'].strftime('%d/%m/%Y'),
+                'origin': docket['origin'],
+                'destination': docket['destination'],
+                'consignor': 'PHC - PRIMARY HEALTH CENTER - BAVLA',
+                'consignee': '\n'.join(consignee_parts) if consignee_parts else docket.get('party_name', ''),
+                'ref_no': docket['ref_no'],
+                'weight': docket['weight'],
+                'amount': docket['amount']
+            }
+            enhanced_dockets.append(enhanced_docket)
+        
+        return jsonify({'success': True, 'dockets': enhanced_dockets})
+        
     except Exception as e:
-        logger.error(f"Error in generate_receipts: {str(e)}")
-        flash(f'Error: {str(e)}', 'error')
-        return render_template('index.html')
+        logger.error(f"Error getting dockets: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/courier-slips')
+def courier_slips():
+    """Render courier slips page with data"""
+    try:
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+        party_code = request.args.get('party_code')
+        
+        if not start_date_str or not end_date_str:
+            return "Missing date parameters", 400
+        
+        # Parse dates
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        # Get dockets
+        dockets = db_manager.get_dockets(start_date, end_date, party_code)
+        
+        if not dockets:
+            return render_template('courier_slips.html', dockets=[], message="No dockets found for the selected criteria")
+        
+        # Get parties for mapping
+        parties = db_manager.get_parties()
+        parties_map = {p['code']: p for p in parties}
+        
+        # Enhance dockets with party information
+        enhanced_dockets = []
+        for docket in dockets:
+            party_info = parties_map.get(docket.get('party_code'), {})
+            
+            # Format consignee info
+            consignee_parts = []
+            if party_info.get('name'):
+                consignee_parts.append(party_info['name'])
+            if party_info.get('adr1'):
+                consignee_parts.append(party_info['adr1'])
+            if party_info.get('adr2'):
+                consignee_parts.append(party_info['adr2'])
+            if party_info.get('city'):
+                consignee_parts.append(party_info['city'])
+            if party_info.get('phone'):
+                consignee_parts.append(f"Phone: {party_info['phone']}")
+            
+            enhanced_docket = {
+                'docket_no': docket['docket_no'],
+                'date': docket['date'].strftime('%d/%m/%Y'),
+                'origin': docket['origin'],
+                'destination': docket['destination'],
+                'consignor': 'PHC - PRIMARY HEALTH CENTER - BAVLA',
+                'consignee': '<br>'.join(consignee_parts) if consignee_parts else docket.get('party_name', ''),
+                'ref_no': docket['ref_no'],
+                'weight': docket['weight'],
+                'amount': docket['amount']
+            }
+            enhanced_dockets.append(enhanced_docket)
+        
+        return render_template('courier_slips.html', dockets=enhanced_dockets)
+        
+    except Exception as e:
+        logger.error(f"Error in courier_slips: {str(e)}")
+        return f"Error: {str(e)}", 500
 
 def cli_mode():
     """Command line interface mode"""
-    print("\n=== Courier Receipt Generator - CLI Mode ===\n")
+    print("\n=== Courier Slip Generator - CLI Mode ===\n")
     
     # Check dependencies
     missing_deps = check_dependencies()
     if missing_deps:
         print(f"Error: Missing dependencies: {', '.join(missing_deps)}")
         print("Please run install_py313.bat to install missing packages.")
-        return
-    
-    # Initialize PDF generator
-    try:
-        logo_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.startswith('logo.') and allowed_file(f)] if os.path.exists(UPLOAD_FOLDER) else []
-        logo_path = os.path.join(UPLOAD_FOLDER, logo_files[0]) if logo_files else None
-        pdf_generator = PDFGenerator(logo_path=logo_path)
-    except ImportError as e:
-        print(f"Error: {e}")
         return
     
     # Test connection
@@ -691,31 +480,16 @@ def cli_mode():
         except ValueError:
             print("Invalid input.")
     
-    # Get dockets
-    print(f"\nSearching for dockets from {start_date} to {end_date}...")
-    dockets = db_manager.get_dockets(start_date, end_date, party_code)
+    # Open in browser
+    party_param = f"&party_code={party_code}" if party_code else ""
+    url = f"http://localhost:5000/courier-slips?start_date={start_date}&end_date={end_date}{party_param}"
     
-    if not dockets:
-        print("No dockets found for the selected criteria.")
-        return
+    print(f"\nOpening courier slips in browser...")
+    print(f"URL: {url}")
+    print("The slips will open in your default browser. You can print them directly from there.")
     
-    print(f"Found {len(dockets)} dockets.")
-    confirm = input("Continue with PDF generation? (y/n): ")
-    if confirm.lower() != 'y':
-        print("Cancelled.")
-        return
-    
-    # Generate PDF
-    parties_map = {p['code']: p for p in parties}
-    filename = f"Receipts_{party_name.replace(' ', '_').replace('/', '_')}_{start_date.strftime('%Y%m%d')}-{end_date.strftime('%Y%m%d')}.pdf"
-    
-    print(f"Generating PDF: {filename}")
-    success = pdf_generator.generate_pdf(dockets, parties_map, filename)
-    
-    if success:
-        print(f"PDF generated successfully: {filename}")
-    else:
-        print("Error generating PDF. Check logs for details.")
+    import webbrowser
+    webbrowser.open(url)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'cli':

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Shree Balaji Courier Slip — 4 per page (Landscape)</title>
+<style>
+:root{--accent:#222;--muted:#f7f7f7}
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;background:var(--muted);margin:0;padding:10px}
+.page{width:297mm;height:210mm;margin:auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8mm;padding:8mm}
+.slip{border:1px solid #333;padding:8mm;background:#fff;display:flex;flex-direction:column;justify-content:flex-start;page-break-inside:avoid}
+.head{display:flex;justify-content:space-between;align-items:flex-start}
+.name{font-weight:700;font-size:14px;color:var(--accent)}
+.addr{font-size:10px;margin-top:4px;color:#333}
+.docket-block{border:1px solid #333;padding:6px;text-align:center;min-width:50mm}
+.docket-block .label{font-size:9px;color:#333}
+.docket{font-weight:700;font-size:12px;margin-top:6px}
+
+.parties{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.box{border:1px dashed #999;padding:6px;min-height:40mm}
+.label{font-size:10px;font-weight:700;color:var(--accent);margin-bottom:6px}
+.content{font-size:10px;color:#222;line-height:1.2}
+
+.info-row{display:flex;gap:8px;margin-top:10px}
+.field{flex:1;border:1px solid #999;padding:6px}
+.field .label{font-size:9px;font-weight:700;color:#333;margin-bottom:4px}
+.field .value{height:18px;font-size:10px;color:#222}
+
+.no-data{text-align:center;padding:50px;color:#666}
+.print-controls{margin:20px 0;text-align:center}
+.print-controls button{margin:10px;padding:10px 20px;font-size:16px}
+
+@media print{
+  body{padding:0;background:white}
+  .page{gap:0;padding:0;width:100%;height:100%}
+  .slip{border:1px solid #000}
+  .print-controls{display:none !important}
+  .no-data{display:none !important}
+}
+</style>
+</head>
+<body>
+
+{% if dockets %}
+    <!-- Print Controls -->
+    <div class="print-controls">
+        <button onclick="window.print()" style="background:#28a745;color:white;border:none;border-radius:5px;">
+            🖨️ Print Courier Slips
+        </button>
+        <button onclick="window.close()" style="background:#6c757d;color:white;border:none;border-radius:5px;">
+            ❌ Close
+        </button>
+    </div>
+
+    {% for page_start in range(0, dockets|length, 4) %}
+    <div class="page">
+        {% set page_dockets = dockets[page_start:page_start+4] %}
+        
+        {% for i in range(4) %}
+            {% if i < page_dockets|length %}
+                {% set docket = page_dockets[i] %}
+                <div class="slip">
+                    <div class="head">
+                        <div>
+                            <div class="name">Shree Balaji Courier Services</div>
+                            <div class="addr">15, Madhav Complex, Nr. Bavla Sanand Chokdi, Bavla - 382220.</div>
+                        </div>
+                        <div class="docket-block">
+                            <div class="label">Docket No.</div>
+                            <div class="docket">{{ docket.docket_no }}</div>
+                        </div>
+                    </div>
+
+                    <div class="parties">
+                        <div class="box">
+                            <div class="label">Consignor</div>
+                            <div class="content">{{ docket.consignor }}</div>
+                        </div>
+                        <div class="box">
+                            <div class="label">Consignee</div>
+                            <div class="content">{{ docket.consignee|safe }}</div>
+                        </div>
+                    </div>
+
+                    <div class="info-row">
+                        <div class="field">
+                            <div class="label">Origin</div>
+                            <div class="value">{{ docket.origin }}</div>
+                        </div>
+                        <div class="field">
+                            <div class="label">Destination</div>
+                            <div class="value">{{ docket.destination }}</div>
+                        </div>
+                        <div class="field" style="max-width:40mm">
+                            <div class="label">Date</div>
+                            <div class="value">{{ docket.date }}</div>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <!-- Empty slip for padding -->
+                <div class="slip" style="border:none;background:transparent;"></div>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% endfor %}
+
+{% else %}
+    <div class="no-data">
+        <h2>No Courier Slips Found</h2>
+        <p>{{ message or "No dockets found for the selected criteria." }}</p>
+        <button onclick="window.close()" style="padding:10px 20px;font-size:16px;background:#6c757d;color:white;border:none;border-radius:5px;">
+            Close Window
+        </button>
+    </div>
+{% endif %}
+
+<script>
+// Auto-focus for printing
+window.addEventListener('load', function() {
+    // If there are slips to print, focus the window
+    {% if dockets %}
+    window.focus();
+    {% endif %}
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // Ctrl+P for print
+    if (e.ctrlKey && e.key === 'p') {
+        e.preventDefault();
+        window.print();
+    }
+    // Escape to close
+    if (e.key === 'Escape') {
+        window.close();
+    }
+});
+</script>
+
+</body>
+</html>
